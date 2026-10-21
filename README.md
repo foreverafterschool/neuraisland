@@ -35,7 +35,7 @@ After changing the login code, run npm run build and commit the root index.html 
 
 Address: https://foreverafterschool.github.io/neuraisland/admin/ (the page is in Romanian, like the other Forever Afterschool games).
 
-With the `admin` account's password, the page can:
+Log in with the username `admin` and the admin page password (shared separately; the same for all three games and different from the in-game `admin` account's password). The page can:
 
 - **add** an account (username and password, with a button that generates a password);
 - **delete** an account: it can no longer log in, on any device;
@@ -43,7 +43,7 @@ With the `admin` account's password, the page can:
 
 There is no server and no database. The account list lives in `accounts.json` in the repository. The admin page edits that file through the GitHub API (each action is a commit on `main`), GitHub Pages republishes it within 1–2 minutes, and the game reads it on every start. A reset stores a `reset` marker (the reset date) on the account; when the game sees a new marker, it wipes that account's local save once on each device. New accounts get a marker too, so they start from zero even if the name was used before. Changes apply the next time the game is opened or reloaded.
 
-The first time on a device, the admin page also asks for a **GitHub access key** (fine-grained personal access token) created from the `foreverafterschool` account, limited to the three game repositories, with the *Contents: Read and write* permission. The page explains the steps. The key stays only in that device's browser, is shared by the admin pages of all three games, and is never put in the repository. Without the key nothing can be changed; the admin password only stops the page from being used on a device where the key is already saved.
+To save to the repository, the admin page uses a GitHub access key (a token with write access to the three repositories), stored in `admin/key.json` encrypted with the admin page password (AES-256-GCM, key derived with PBKDF2-SHA-256, 1,000,000 iterations). The password is not stored in the repository. When the token expires or the password changes, `admin/key.json` must be regenerated (the same file in all three repositories). The encrypted file is public, so its safety depends on the password length: a short password can be guessed offline with enough effort. If you suspect that, revoke the token on GitHub and create a new one.
 
 If `accounts.json` cannot be read (for example when `index.html` is opened by double-click), the game falls back to the original account list built into `src/auth.js`, without the admin changes. For developers: the admin page commits directly to `main`, so run `git pull` before working in the repository.
 

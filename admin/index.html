@@ -8,12 +8,12 @@
 <style>
   :root {
     --bg: #f5f3ee; --card: #ffffff; --text: #1f2430; --muted: #6a7184; --line: #e2dfd6;
-    --accent: #2f6fdd; --accent-text: #ffffff; --danger: #c43c3c; --ok: #1d7f47; --warn-bg: #fff6dd;
+    --accent: #2f6fdd; --accent-text: #ffffff; --danger: #c43c3c; --ok: #1d7f47;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #15171c; --card: #1f222a; --text: #e9ebf0; --muted: #9aa1b2; --line: #30343e;
-      --accent: #5b8ff0; --accent-text: #0e1320; --danger: #ef6b6b; --ok: #4cc27f; --warn-bg: #2b2716;
+      --accent: #5b8ff0; --accent-text: #0e1320; --danger: #ef6b6b; --ok: #4cc27f;
     }
   }
   * { box-sizing: border-box; }
@@ -37,10 +37,6 @@
   button:disabled { opacity: .45; cursor: default; }
   .error { color: var(--danger); min-height: 1.5em; margin: 10px 0; }
   .hint { color: var(--muted); font-size: .9rem; margin: 8px 0 0; }
-  details { margin-top: 12px; background: var(--warn-bg); border-radius: 10px; padding: 10px 14px; font-size: .95rem; }
-  summary { cursor: pointer; font-weight: 600; }
-  details ol { padding-left: 20px; margin: 10px 0; }
-  details li { margin: 4px 0; }
   .add-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
   .add-row label { margin-top: 0; }
   .pass { display: flex; gap: 6px; }
@@ -78,26 +74,10 @@
   <section id="loginView" hidden>
     <form id="loginForm" class="card">
       <h2>Intră în panou</h2>
-      <label for="password">Parola contului <b>admin</b> din joc</label>
+      <label for="username">Utilizator</label>
+      <input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label for="password">Parolă</label>
       <input id="password" type="password" autocomplete="current-password" required>
-      <div id="tokenBox" hidden>
-        <label for="token">Cheie de acces GitHub</label>
-        <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-        <details>
-          <summary>Cum obțin cheia? (o singură dată pe acest dispozitiv)</summary>
-          <ol>
-            <li>Intră pe GitHub cu contul <b>foreverafterschool</b> și deschide
-              <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">pagina pentru chei noi</a>.</li>
-            <li>Dă-i un nume (de ex. „Panou admin”) și alege data de expirare.</li>
-            <li>La <b>Repository access</b> alege <b>Only select repositories</b> și bifează
-              <b>escaperoom</b>, <b>neuraisland</b> și <b>inventatorii</b>.</li>
-            <li>La <b>Permissions → Repository permissions → Contents</b> alege <b>Read and write</b>.</li>
-            <li>Apasă <b>Generate token</b>, copiază cheia și lipește-o mai sus.</li>
-          </ol>
-          Cheia rămâne salvată doar în acest browser și merge la panourile tuturor celor trei jocuri.
-          Nu o trimite nimănui: cu ea se pot modifica jocurile.
-        </details>
-      </div>
       <p id="loginError" class="error" role="alert"></p>
       <button id="loginButton" type="submit">Intră</button>
     </form>
@@ -139,7 +119,6 @@
     <div class="footer">
       <a class="link-button" href="../">Deschide jocul</a>
       <button id="logout" type="button" class="secondary">Ieși</button>
-      <button id="forgetToken" type="button" class="danger">Șterge cheia GitHub de pe acest dispozitiv</button>
     </div>
   </section>
 </main>
@@ -163,9 +142,10 @@ const SITES = [
 ];
 const ADMIN_USER = 'admin';
 const API = 'https://api.github.com';
-// Toate cele trei jocuri sunt pe foreverafterschool.github.io, deci împart cheia salvată.
-const TOKEN_KEY = 'forever-afterschool-admin-github-token';
-const SESSION_KEY = 'forever-afterschool-admin-session:' + CONFIG.repo;
+// Cheia GitHub a panoului, criptată cu parola de admin (AES-GCM, cheie derivată cu PBKDF2).
+const KEY_FILE = 'key.json';
+// Toate cele trei jocuri sunt pe foreverafterschool.github.io, deci împart sesiunea din aceeași filă.
+const SESSION_KEY = 'forever-afterschool-admin-session';
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,31}$/;
 const PUBLISH_NOTE = 'Ajunge pe toate dispozitivele în 1–2 minute, la următoarea deschidere a jocului.';
@@ -176,7 +156,7 @@ let token = '';
 let accounts = null; // conținutul accounts.json
 let busy = false;
 
-/* ---------- parole: exact ca în fiecare joc ---------- */
+/* ---------- parolele conturilor noi: exact ca în fiecare joc ---------- */
 const encoder = new TextEncoder();
 const toHex = (buffer) => Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, '0')).join('');
 const fromHex = (hex) => Uint8Array.from(hex.match(/.{2}/g), (b) => parseInt(b, 16));
@@ -195,9 +175,6 @@ const SCHEMES = {
       const salt = randomHex(16);
       return { salt, hash: await pbkdf2(password, encoder.encode(salt), 210000) };
     },
-    async check(user, password, account) {
-      return await pbkdf2(password, encoder.encode(account.salt), 210000) === account.hash;
-    },
   },
   // inventatorii: PBKDF2-SHA-256, sarea ca octeți, iterațiile din accounts.json.
   'pbkdf2-hex-salt': {
@@ -205,17 +182,11 @@ const SCHEMES = {
       const salt = randomHex(16);
       return { salt, hash: await pbkdf2(password, fromHex(salt), data.iterations) };
     },
-    async check(user, password, account, data) {
-      return await pbkdf2(password, fromHex(account.salt), data.iterations) === account.hash;
-    },
   },
   // neuraisland: SHA-256 din „utilizator:parolă”.
   'sha256-user': {
     async create(user, password) {
       return { hash: await sha256(user + ':' + password) };
-    },
-    async check(user, password, account) {
-      return await sha256(user + ':' + password) === account.hash;
     },
   },
 };
@@ -280,9 +251,11 @@ async function save(message, change) {
   }
 }
 function describe(error) {
-  if (error.status === 401) return 'Cheia GitHub nu este validă sau a expirat.';
+  if (error.status === 401) {
+    return 'Cheia de acces GitHub a panoului nu mai este validă (a expirat sau a fost revocată) și trebuie înlocuită în admin/key.json.';
+  }
   if (error.status === 403 || error.status === 404) {
-    return `Cheia GitHub nu are acces de scriere la ${CONFIG.repo}. Creează o cheie care include acest repository, cu permisiunea Contents: Read and write.`;
+    return `Cheia de acces GitHub a panoului nu are drept de scriere la ${CONFIG.repo}.`;
   }
   if (error.status === 409) return 'Lista a fost modificată în același timp din alt loc. Încearcă din nou.';
   if (error.status) return `GitHub a răspuns cu eroarea ${error.status}. Încearcă din nou peste puțin timp.`;
@@ -290,37 +263,48 @@ function describe(error) {
 }
 
 /* ---------- cheie și sesiune ---------- */
-function readToken() {
-  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
-}
-function storeToken(value) {
-  try { localStorage.setItem(TOKEN_KEY, value); } catch (e) { /* rămâne doar în memorie */ }
-}
-function forgetToken() {
-  token = '';
-  try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* stocare blocată */ }
+// Decriptează cheia GitHub a panoului cu parola de admin. Întoarce '' dacă parola e greșită.
+async function unlockToken(password) {
+  let response, box;
+  try {
+    response = await fetch(KEY_FILE + '?t=' + Date.now(), { cache: 'no-store' });
+    if (response.ok) box = await response.json();
+  } catch (e) { /* tratat mai jos */ }
+  if (response && response.status === 404) throw new Error('Panoul nu este configurat încă: lipsește cheia de acces (admin/key.json).');
+  if (!box) throw new Error('Nu am putut încărca panoul. Verifică internetul și încearcă din nou.');
+  const material = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: fromHex(box.salt), iterations: box.iterations },
+    material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  try {
+    const data = Uint8Array.from(atob(box.data), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromHex(box.iv) }, key, data));
+  } catch (e) {
+    return ''; // AES-GCM refuză decriptarea cu altă parolă
+  }
 }
 function startSession() {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ expires: Date.now() + SESSION_MS })); } catch (e) { /* doar până la reîncărcare */ }
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token, expires: Date.now() + SESSION_MS })); } catch (e) { /* doar până la reîncărcare */ }
 }
 function endSession() {
+  token = '';
   try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* stocare blocată */ }
 }
-function hasSession() {
+function readSession() {
   try {
     const session = JSON.parse(sessionStorage.getItem(SESSION_KEY));
-    return !!session && session.expires > Date.now() && session.expires <= Date.now() + SESSION_MS;
-  } catch (e) { return false; }
+    if (session && session.token && session.expires > Date.now() && session.expires <= Date.now() + SESSION_MS) return session.token;
+  } catch (e) { /* sesiune invalidă */ }
+  return '';
 }
 
 /* ---------- ecrane ---------- */
 function showLogin(message) {
   $('panelView').hidden = true;
   $('loginView').hidden = false;
-  $('tokenBox').hidden = !!readToken();
   $('loginError').textContent = message || '';
   $('password').value = '';
-  $('password').focus();
+  ($('username').value ? $('password') : $('username')).focus();
 }
 function showPanel() {
   $('loginView').hidden = true;
@@ -329,9 +313,8 @@ function showPanel() {
   render();
 }
 function expired() {
-  forgetToken();
   endSession();
-  showLogin('Cheia GitHub nu mai este validă (a expirat sau a fost ștearsă). Lipește o cheie nouă.');
+  showLogin(describe({ status: 401 }));
 }
 function setStatus(text, kind) {
   const status = $('status');
@@ -417,36 +400,26 @@ $('loginForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (busy) return;
   const error = $('loginError');
+  const user = $('username').value.trim().toLowerCase();
   const password = $('password').value;
-  token = readToken() || $('token').value.trim();
   error.textContent = '';
-  if (!token) {
-    error.textContent = 'Lipește cheia de acces GitHub.';
-    $('token').focus();
-    return;
-  }
   busy = true;
   $('loginButton').disabled = true;
   $('loginButton').textContent = 'Se verifică…';
   try {
-    const { data } = await readAccounts();
-    const admin = has(data.users, ADMIN_USER) ? data.users[ADMIN_USER] : null;
-    if (!admin || !await scheme.check(ADMIN_USER, password, admin, data)) {
-      error.textContent = 'Parola contului admin este greșită.';
+    const unlocked = user === ADMIN_USER ? await unlockToken(password) : '';
+    if (!unlocked) {
+      error.textContent = 'Utilizator sau parolă incorectă.';
       $('password').value = '';
       $('password').focus();
       return;
     }
-    storeToken(token);
+    token = unlocked;
+    accounts = (await readAccounts()).data;
     startSession();
-    accounts = data;
-    $('token').value = '';
     showPanel();
   } catch (e) {
-    if (e.status === 401) {
-      forgetToken();
-      $('tokenBox').hidden = false;
-    }
+    token = '';
     error.textContent = describe(e);
   } finally {
     busy = false;
@@ -512,13 +485,6 @@ $('logout').addEventListener('click', () => {
   showLogin();
 });
 
-$('forgetToken').addEventListener('click', () => {
-  if (!confirm('Ștergi cheia GitHub de pe acest dispozitiv? Va trebui lipită din nou la următoarea intrare, în panoul oricărui joc.')) return;
-  forgetToken();
-  endSession();
-  showLogin();
-});
-
 /* ---------- pornire ---------- */
 (async function start() {
   document.title = 'Admin · ' + CONFIG.game;
@@ -535,8 +501,8 @@ $('forgetToken').addEventListener('click', () => {
     $('loginButton').disabled = true;
     return;
   }
-  token = readToken();
-  if (token && hasSession()) {
+  token = readSession();
+  if (token) {
     try {
       accounts = (await readAccounts()).data;
       showPanel();
