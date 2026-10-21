@@ -1,5 +1,5 @@
 // Saved game state + a tiny event bus.
-import { getUser } from './auth.js';
+import { getUser, getResetMarker } from './auth.js';
 const key = () => getUser() ? 'neura-island-save-v1:' + getUser() : null;
 
 function defaults() {
@@ -56,6 +56,21 @@ export function save() {
     if (key()) localStorage.setItem(key(), JSON.stringify(state));
   } catch {
     /* storage can be blocked; the game still works for this session */
+  }
+}
+
+// Progress reset requested from the admin/ page: applied once on each device.
+export function applyAdminReset() {
+  const marker = getResetMarker();
+  if (!marker || !key()) return;
+  const markerKey = 'neura-island-reset-v1:' + getUser();
+  try {
+    if (localStorage.getItem(markerKey) !== marker) {
+      localStorage.removeItem(key());
+      localStorage.setItem(markerKey, marker);
+    }
+  } catch {
+    /* storage can be blocked */
   }
 }
 

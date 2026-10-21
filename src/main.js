@@ -1,7 +1,7 @@
 import './styles.css';
-import { load, state } from './state.js';
+import { applyAdminReset, load, state } from './state.js';
 import { Game } from './game.js';
-import { restoreSession } from './auth.js';
+import { loadAccounts, restoreSession } from './auth.js';
 import { loginScreen } from './ui/login.js';
 
 async function boot() {
@@ -22,7 +22,9 @@ async function boot() {
 // Wait for the fonts (if online) so 3D signs render with the right typeface.
 const fontsReady = document.fonts && document.fonts.ready ? Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]) : Promise.resolve();
 async function start() {
+  await loadAccounts();
   if (!restoreSession()) await loginScreen();
+  applyAdminReset();
   const language = state.lang;
   if (!load()) state.lang = language;
   await fontsReady;

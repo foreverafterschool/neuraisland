@@ -23,13 +23,29 @@ Progress is saved automatically in the browser (localStorage), separately for ea
 
 ## Classroom login (Forever Afterschool edition)
 
-Enter one of the 36 assigned Forever Afterschool accounts with its supplied password. The supplied list includes 30 child accounts, 5 teacher accounts and 1 admin account. All accounts use the same game features; role labels do not grant additional permissions. Usernames ignore surrounding spaces and letter case; passwords are case-sensitive. Login appears before the 3D game starts, in English or Romanian. Use **Log out / Deconectare** on the title screen or in the game menu to switch accounts.
+Enter one of the 36 assigned Forever Afterschool accounts with its supplied password. The supplied list includes 30 child accounts, 5 teacher accounts and 1 admin account. All accounts use the same game features; role labels do not grant additional permissions. Accounts are managed from the `/admin` page (see below). Usernames ignore surrounding spaces and letter case; passwords are case-sensitive. Login appears before the 3D game starts, in English or Romanian. Use **Log out / Deconectare** on the title screen or in the game menu to switch accounts.
 
-The current account is remembered in sessionStorage across reloads in the same tab. Progress is stored locally under an account-specific key; it does not sync between devices. The old shared save is left untouched and is not assigned to any account. If browser storage is blocked, you can still play, but progress and login may not survive a reload.
+The current account is remembered in sessionStorage across reloads in the same tab. Progress is stored locally under an account-specific key; it does not sync between devices (only progress resets requested from the admin page reach every device). The old shared save is left untouched and is not assigned to any account. If browser storage is blocked, you can still play, but progress and login may not survive a reload.
 
 This is a simple offline classroom gate for the existing static GitHub Pages game, **not secure server-side authentication**. Only SHA-256 password digests are included in src/auth.js, but downloaded code and browser storage can be inspected or changed. Do not use this gate to protect sensitive data. Password verification requires Web Crypto (HTTPS, localhost, or the downloaded file in a compatible browser).
 
-After changing the login or account digests, run npm run build and commit the root index.html as well.
+After changing the login code, run npm run build and commit the root index.html as well. Account changes made from the admin page need no rebuild.
+
+### Admin page (`/admin`)
+
+Address: https://foreverafterschool.github.io/neuraisland/admin/ (the page is in Romanian, like the other Forever Afterschool games).
+
+With the `admin` account's password, the page can:
+
+- **add** an account (username and password, with a button that generates a password);
+- **delete** an account: it can no longer log in, on any device;
+- **reset an account's progress**: the progress is wiped on every device.
+
+There is no server and no database. The account list lives in `accounts.json` in the repository. The admin page edits that file through the GitHub API (each action is a commit on `main`), GitHub Pages republishes it within 1–2 minutes, and the game reads it on every start. A reset stores a `reset` marker (the reset date) on the account; when the game sees a new marker, it wipes that account's local save once on each device. New accounts get a marker too, so they start from zero even if the name was used before. Changes apply the next time the game is opened or reloaded.
+
+The first time on a device, the admin page also asks for a **GitHub access key** (fine-grained personal access token) created from the `foreverafterschool` account, limited to the three game repositories, with the *Contents: Read and write* permission. The page explains the steps. The key stays only in that device's browser, is shared by the admin pages of all three games, and is never put in the repository. Without the key nothing can be changed; the admin password only stops the page from being used on a device where the key is already saved.
+
+If `accounts.json` cannot be read (for example when `index.html` is opened by double-click), the game falls back to the original account list built into `src/auth.js`, without the admin changes. For developers: the admin page commits directly to `main`, so run `git pull` before working in the repository.
 
 ## Publish on GitHub Pages
 
@@ -156,6 +172,8 @@ The world follows real physics, and signs around the hub explain it:
 ## Project structure
 
 ```
+accounts.json           account list (edited from the admin page)
+admin/index.html        admin page (/admin)
 src/index.html          page shell (development entry)
 src/main.js             boot
 src/game.js             game loop, camera, interactions, panels

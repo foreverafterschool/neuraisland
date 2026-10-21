@@ -1,6 +1,8 @@
 // Offline classroom access gate, not server-side authentication.
 // Digests avoid storing plaintext passwords, but the downloadable game can be modified.
-const ACCOUNTS = Object.freeze({
+// The live account list is accounts.json, managed from the admin/ page. This built-in
+// list is only the fallback for when that file cannot be read (e.g. opened by double-click).
+const FALLBACK_ACCOUNTS = Object.freeze({
   "user01": "18e532fdcfa25566d4ecdfeefb915233706b01d37805cc657dad852152de2fc1",
   "user02": "3e1a2aa66a04320ab287f607db916fb27f567e9806e8d59f25328ca27f635b8a",
   "user03": "404319eeb44f635bb5326488b14972ba0b5b35d61af17a415633d801d6aa3262",
@@ -40,10 +42,29 @@ const ACCOUNTS = Object.freeze({
 });
 const SESSION_KEY = 'neura-island-user-v1';
 let currentUser = null;
-const isAccount = (user) => Object.prototype.hasOwnProperty.call(ACCOUNTS, user);
+// username -> { hash, reset? }, same shape as accounts.json.
+let accounts = Object.fromEntries(Object.entries(FALLBACK_ACCOUNTS).map(([user, hash]) => [user, { hash }]));
+const isAccount = (user) => Object.prototype.hasOwnProperty.call(accounts, user);
+
+// Read on every start, so deletions and resets made in admin reach every device.
+export async function loadAccounts() {
+  try {
+    const response = await fetch('accounts.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (data && data.users) accounts = data.users;
+  } catch {
+    // Offline or opened from a file: keep the built-in list.
+  }
+}
 
 export function getUser() {
   return currentUser;
+}
+
+// Marker of the latest progress reset requested from admin for the current user ('' if none).
+export function getResetMarker() {
+  return (currentUser && accounts[currentUser] && accounts[currentUser].reset) || '';
 }
 
 export function restoreSession() {
@@ -61,7 +82,7 @@ export async function login(username, password) {
   if (!isAccount(user)) return false;
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(user + ':' + password));
   const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-  if (hex !== ACCOUNTS[user]) return false;
+  if (hex !== accounts[user].hash) return false;
   currentUser = user;
   try {
     sessionStorage.setItem(SESSION_KEY, user);
